@@ -1,0 +1,5 @@
+{
+  "name": "MarketCharge - Battery Rental Management",
+  "description": "A specialized battery rental system for vegetable markets featuring role-based access, automated serial number tracking, and a 100% tap-based interface for staff on the go.",
+  "requestFramePermissions": []
+}
