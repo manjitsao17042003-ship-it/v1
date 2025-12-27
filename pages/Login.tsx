@@ -11,14 +11,24 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [id, setId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const user = db.getUsers().find(u => u.id === id && u.password === password);
-    if (user) {
-      onLogin(user);
-    } else {
-      setError('Invalid ID or Password');
+    setIsLoading(true);
+    setError('');
+    try {
+      const users = await db.getUsers();
+      const user = users.find(u => u.id === id && u.password === password);
+      if (user) {
+        onLogin(user);
+      } else {
+        setError('Invalid ID or Password');
+      }
+    } catch (err) {
+      setError('Connection Error');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -44,6 +54,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               value={id}
               onChange={(e) => setId(e.target.value)}
               placeholder="Enter ID"
+              disabled={isLoading}
               required
             />
           </div>
@@ -55,6 +66,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter Password"
+              disabled={isLoading}
               required
             />
           </div>
@@ -63,9 +75,15 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
           <button
             type="submit"
-            className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-emerald-700 transition-all active:scale-[0.98]"
+            disabled={isLoading}
+            className={`w-full bg-emerald-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-emerald-700 transition-all active:scale-[0.98] flex items-center justify-center ${isLoading ? 'opacity-70' : ''}`}
           >
-            Login
+            {isLoading ? (
+              <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            ) : 'Login'}
           </button>
         </form>
       </div>

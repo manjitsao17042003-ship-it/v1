@@ -1,32 +1,35 @@
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db, naturalSort } from '../services/storage';
-import { UserRole, RentalStatus, BatteryColor } from '../types';
+// Fix: Added Battery to the import list from '../types'
+import { UserRole, RentalStatus, BatteryColor, User, Market, Rental, Customer, MarketDefinition, Battery } from '../types';
 
 const AdminDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'summary' | 'staff' | 'customers' | 'batteries' | 'markets' | 'demand'>('summary');
+  const [activeTab, setActiveTab] = useState<'summary' | 'staff' | 'customers' | 'batteries' | 'markets' | 'reports'>('summary');
   const [refresh, setRefresh] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Global State for Customers Tab
+  // Global State for Dash
+  const [markets, setMarkets] = useState<Market[]>([]);
+  const [rentals, setRentals] = useState<Rental[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [marketDefs, setMarketDefs] = useState<MarketDefinition[]>([]);
+  const [batteries, setBatteries] = useState<Battery[]>([]);
+
+  // Form States
   const [selectedTargetMarket, setSelectedTargetMarket] = useState<string>('');
-
-  // Market Config Forms
   const [newMarketName, setNewMarketName] = useState('');
   const [newMarketDay, setNewMarketDay] = useState('Sunday');
-
-  // Forms
   const [staffName, setStaffName] = useState('');
   const [staffId, setStaffId] = useState('');
   const [staffPass, setStaffPass] = useState('');
-
   const [custName, setCustName] = useState('');
-
   const [prefix, setPrefix] = useState('');
   const [start, setStart] = useState(1);
   const [end, setEnd] = useState(10);
   const [bColor, setBColor] = useState<BatteryColor>('default');
-
   const [mName, setMName] = useState('');
   const [mDate, setMDate] = useState(new Date().toISOString().split('T')[0]);
   const [mStaff, setMStaff] = useState('');
@@ -34,41 +37,81 @@ const AdminDashboard: React.FC = () => {
   const [mStart, setMStart] = useState(1);
   const [mEnd, setMEnd] = useState(10);
 
-  const handleAddStaff = (e: React.FormEvent) => {
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoading(true);
+      try {
+        const [m, r, u, c, md, b] = await Promise.all([
+          db.getMarkets(),
+          db.getRentals(),
+          db.getUsers(),
+          db.getCustomers(),
+          db.getMarketDefinitions(),
+          db.getBatteries()
+        ]);
+        setMarkets(m);
+        setRentals(r);
+        setUsers(u);
+        setCustomers(c);
+        setMarketDefs(md);
+        setBatteries(b);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchData();
+  }, [refresh]);
+
+  const reportsData = useMemo(() => {
+    return markets.map(m => {
+      const marketRentals = rentals.filter(r => r.marketId === m.id);
+      const given = marketRentals.filter(r => r.status === RentalStatus.GIVEN).length;
+      const returned = marketRentals.filter(r => r.status === RentalStatus.RETURNED).length;
+      const totalStock = m.batteryRangeEnd - m.batteryRangeStart + 1;
+      const staff = users.find(u => u.id === m.staffId);
+
+      return {
+        ...m,
+        staffName: staff?.name || 'Unknown',
+        given,
+        returned,
+        totalStock,
+        isCleared: given === 0 && returned > 0
+      };
+    }).sort((a, b) => b.date.localeCompare(a.date));
+  }, [markets, rentals, users]);
+
+  const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    db.addUser({ id: staffId, name: staffName, password: staffPass, role: UserRole.STAFF });
+    await db.addUser({ id: staffId, name: staffName, password: staffPass, role: UserRole.STAFF });
     setStaffName(''); setStaffId(''); setStaffPass(''); setRefresh(r => r + 1);
   };
 
-  const handleAddMarketDef = (e: React.FormEvent) => {
+  const handleAddMarketDef = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMarketName.trim()) return;
-    db.addMarketDefinition(newMarketName, newMarketDay);
+    await db.addMarketDefinition(newMarketName, newMarketDay);
     setNewMarketName('');
     setRefresh(r => r + 1);
   };
 
-  const handleAddCustomer = (e: React.FormEvent) => {
+  const handleAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTargetMarket) {
-      alert("Please select a target market first.");
-      return;
-    }
-    const isDaily = selectedTargetMarket === 'Daily';
-    db.addCustomer(custName, selectedTargetMarket, isDaily);
+    if (!selectedTargetMarket) return alert("Select target market");
+    await db.addCustomer(custName, selectedTargetMarket, selectedTargetMarket === 'Daily');
     setCustName(''); setRefresh(r => r + 1);
   };
 
-  const handleDeleteCustomer = (id: string) => {
+  const handleDeleteCustomer = async (id: string) => {
     if (confirm("Delete this customer?")) {
-      db.deleteCustomer(id);
+      await db.deleteCustomer(id);
       setRefresh(r => r + 1);
     }
   };
 
-  const handleCreateMarket = (e: React.FormEvent) => {
+  const handleCreateMarket = async (e: React.FormEvent) => {
     e.preventDefault();
-    db.addMarket({
+    await db.addMarket({
       id: Math.random().toString(36).substr(2, 9),
       name: mName,
       date: mDate,
@@ -82,7 +125,6 @@ const AdminDashboard: React.FC = () => {
     alert('Market scheduled successfully.');
   };
 
-  const marketDefs = db.getMarketDefinitions();
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
   const TabButton = ({ id, label }: { id: typeof activeTab, label: string }) => (
@@ -94,10 +136,17 @@ const AdminDashboard: React.FC = () => {
     </button>
   );
 
+  if (isLoading) return (
+    <div className="flex items-center justify-center py-20">
+      <div className="animate-spin h-12 w-12 border-4 border-emerald-600 border-t-transparent rounded-full"></div>
+    </div>
+  );
+
   return (
     <div className="space-y-6 pb-12">
       <div className="flex gap-2 pb-2 border-b overflow-x-auto no-scrollbar">
         <TabButton id="summary" label="Dashboard" />
+        <TabButton id="reports" label="Reports" />
         <TabButton id="markets" label="Scheduling" />
         <TabButton id="staff" label="Staff" />
         <TabButton id="customers" label="Customers" />
@@ -115,7 +164,6 @@ const AdminDashboard: React.FC = () => {
               </select>
               <button className="bg-emerald-600 text-white px-8 rounded-2xl font-black">Add Market</button>
             </form>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8">
               {days.map(day => {
                 const dayMarkets = marketDefs.filter(m => m.day === day);
@@ -127,13 +175,79 @@ const AdminDashboard: React.FC = () => {
                       {dayMarkets.map(m => (
                         <div key={m.id} className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100">
                           <span className="font-bold">{m.name}</span>
-                          <button onClick={() => db.deleteMarketDefinition(m.id)} className="text-rose-400 hover:text-rose-600 font-black">×</button>
+                          <button onClick={() => { db.deleteMarketDefinition(m.id); setRefresh(r => r + 1); }} className="text-rose-400 hover:text-rose-600 font-black">×</button>
                         </div>
                       ))}
                     </div>
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'reports' && (
+        <div className="space-y-6 animate-in fade-in duration-500">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-emerald-600 text-white p-6 rounded-3xl shadow-lg">
+              <p className="text-sm font-black uppercase opacity-80">Active Markets</p>
+              <p className="text-4xl font-black">{reportsData.filter(m => m.given > 0).length}</p>
+            </div>
+            <div className="bg-rose-500 text-white p-6 rounded-3xl shadow-lg">
+              <p className="text-sm font-black uppercase opacity-80">Total Units Out</p>
+              <p className="text-4xl font-black">{reportsData.reduce((acc, m) => acc + m.given, 0)}</p>
+            </div>
+            <div className="bg-white border p-6 rounded-3xl shadow-sm">
+              <p className="text-sm font-black uppercase text-gray-400">Total Returned (Overall)</p>
+              <p className="text-4xl font-black text-emerald-600">
+                {reportsData.reduce((acc, m) => acc + m.returned, 0)}
+              </p>
+            </div>
+          </div>
+          <div className="bg-white rounded-[2rem] border overflow-hidden shadow-sm">
+            <div className="p-6 border-b bg-gray-50 flex justify-between items-center">
+              <h3 className="font-black text-xl">Market Performance Report</h3>
+              <button onClick={() => setRefresh(r => r + 1)} className="text-emerald-600 font-black text-sm uppercase">Refresh Data</button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="bg-gray-50 text-[10px] uppercase font-black text-gray-400 border-b">
+                  <tr>
+                    <th className="px-6 py-4">Market / Date</th>
+                    <th className="px-6 py-4">Staff</th>
+                    <th className="px-6 py-4 text-center">GIVEN</th>
+                    <th className="px-6 py-4 text-center">RETURNED</th>
+                    <th className="px-6 py-4">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {reportsData.map(report => (
+                    <tr key={report.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <p className="font-black text-gray-800">{report.name}</p>
+                        <p className="text-[10px] text-gray-400 font-mono">{report.date}</p>
+                      </td>
+                      <td className="px-6 py-4 font-bold text-gray-600">{report.staffName}</td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`font-black text-lg ${report.given > 0 ? 'text-rose-500' : 'text-gray-300'}`}>
+                          {report.given}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center font-black text-emerald-600 text-lg">{report.returned}</td>
+                      <td className="px-6 py-4">
+                        {report.given > 0 ? (
+                          <span className="bg-rose-100 text-rose-700 px-3 py-1 rounded-full text-[10px] font-black uppercase border border-rose-200">Pending</span>
+                        ) : report.returned > 0 ? (
+                          <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-[10px] font-black uppercase border border-emerald-200">Cleared</span>
+                        ) : (
+                          <span className="bg-gray-100 text-gray-400 px-3 py-1 rounded-full text-[10px] font-black uppercase border border-gray-200">No Action</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -147,7 +261,7 @@ const AdminDashboard: React.FC = () => {
               <label className="text-xs font-black text-gray-400 uppercase">Market Type</label>
               <select value={mName} onChange={e => setMName(e.target.value)} className="w-full border p-4 rounded-2xl bg-gray-50 font-bold" required>
                 <option value="">Choose...</option>
-                <option value="Daily" className="text-blue-600">Daily Walk-ins</option>
+                <option value="Daily">Daily Walk-ins</option>
                 {marketDefs.map(n => <option key={n.id} value={n.name}>{n.day}: {n.name}</option>)}
               </select>
             </div>
@@ -159,7 +273,7 @@ const AdminDashboard: React.FC = () => {
               <label className="text-xs font-black text-gray-400 uppercase">Assign Staff</label>
               <select value={mStaff} onChange={e => setMStaff(e.target.value)} className="w-full border p-4 rounded-2xl bg-gray-50 font-bold" required>
                 <option value="">Choose Staff...</option>
-                {db.getUsers().filter(u => u.role === UserRole.STAFF).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                {users.filter(u => u.role === UserRole.STAFF).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
             <div className="space-y-1">
@@ -189,21 +303,19 @@ const AdminDashboard: React.FC = () => {
               {marketDefs.map(n => <option key={n.id} value={n.name}>{n.day}: {n.name}</option>)}
             </select>
           </div>
-
           {selectedTargetMarket && (
             <div className="bg-white p-8 rounded-3xl border space-y-6">
                <h3 className="font-black text-xl text-emerald-700">Add to {selectedTargetMarket}</h3>
                <form onSubmit={handleAddCustomer} className="flex gap-4">
                  <input value={custName} onChange={e => setCustName(e.target.value)} placeholder="Full Name" className="flex-1 border p-4 rounded-2xl bg-gray-50 font-bold" required />
-                 <button className="bg-emerald-600 text-white px-8 rounded-2xl font-black">Save (Auto Serial)</button>
+                 <button className="bg-emerald-600 text-white px-8 rounded-2xl font-black">Save</button>
                </form>
             </div>
           )}
-
           <div className="bg-white rounded-[2rem] border p-8 shadow-sm">
             <h3 className="font-black text-2xl mb-8">{selectedTargetMarket || 'All'} Customers</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {db.getCustomers()
+              {customers
                 .filter(c => !selectedTargetMarket || c.marketName === selectedTargetMarket)
                 .sort((a,b) => naturalSort(a.serialNumber, b.serialNumber)).map(c => (
                 <div key={c.id} className="p-6 bg-gray-50 rounded-2xl border flex justify-between items-start group">
@@ -226,7 +338,7 @@ const AdminDashboard: React.FC = () => {
 
       {activeTab === 'batteries' && (
         <div className="space-y-6">
-          <form onSubmit={(e) => { e.preventDefault(); db.addBatteryRange(prefix, start, end, bColor); setRefresh(r => r + 1); }} className="bg-white p-8 rounded-3xl border grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+          <form onSubmit={async (e) => { e.preventDefault(); await db.addBatteryRange(prefix, start, end, bColor); setRefresh(r => r + 1); }} className="bg-white p-8 rounded-3xl border grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
             <div>
               <label className="text-[10px] font-black uppercase text-gray-400">Prefix</label>
               <input value={prefix} onChange={e => setPrefix(e.target.value.toUpperCase())} className="w-full border p-4 rounded-2xl bg-gray-50 font-bold" required />
@@ -244,10 +356,10 @@ const AdminDashboard: React.FC = () => {
           <div className="bg-white p-8 rounded-3xl border">
             <h3 className="font-black text-xl mb-6">Inventory List</h3>
             <div className="flex flex-wrap gap-2">
-              {db.getBatteries().sort((a,b) => naturalSort(a.serial, b.serial)).map(b => (
+              {batteries.sort((a,b) => naturalSort(a.serial, b.serial)).map(b => (
                 <div key={b.serial} className="px-3 py-2 bg-gray-50 rounded-xl text-xs font-mono font-black border group flex items-center gap-2">
                   {b.serial}
-                  <button onClick={() => { if(confirm("Remove?")) db.deleteBattery(b.serial); setRefresh(r => r + 1); }} className="text-rose-300 hover:text-rose-600 font-bold">×</button>
+                  <button onClick={async () => { if(confirm("Remove?")) { await db.deleteBattery(b.serial); setRefresh(r => r + 1); } }} className="text-rose-300 hover:text-rose-600 font-bold">×</button>
                 </div>
               ))}
             </div>
@@ -267,15 +379,56 @@ const AdminDashboard: React.FC = () => {
             <button className="w-full bg-emerald-600 text-white p-4 rounded-2xl font-black hover:bg-emerald-700 transition-colors">Create Account</button>
           </form>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8">
-            {db.getUsers().filter(u => u.role === UserRole.STAFF).map(u => (
-              <div key={u.id} className="p-6 bg-white rounded-3xl border flex justify-between items-center group shadow-sm">
-                <div>
-                  <span className="font-black text-gray-800 text-lg block">{u.name}</span>
-                  <span className="text-xs font-mono text-gray-400">ID: {u.id}</span>
+            {users.filter(u => u.role === UserRole.STAFF).map(u => {
+              const staffMarkets = reportsData.filter(m => m.staffId === u.id);
+              const totalOut = staffMarkets.reduce((acc, m) => acc + m.given, 0);
+              const isExpanded = expandedStaffId === u.id;
+              return (
+                <div key={u.id} className="bg-white rounded-3xl border shadow-sm overflow-hidden flex flex-col group">
+                  <div 
+                    onClick={() => setExpandedStaffId(isExpanded ? null : u.id)}
+                    className="p-6 flex justify-between items-center cursor-pointer hover:bg-gray-50 transition-colors"
+                  >
+                    <div>
+                      <span className="font-black text-gray-800 text-lg block">{u.name}</span>
+                      <span className="text-xs font-mono text-gray-400">ID: {u.id}</span>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <div className="text-[10px] text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full font-black uppercase border border-emerald-100">Staff</div>
+                      {totalOut > 0 && (
+                        <span className="text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full font-black">
+                          {totalOut} PENDING
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {isExpanded && (
+                    <div className="p-6 bg-gray-50 border-t space-y-4 animate-in slide-in-from-top-2">
+                      <h4 className="text-xs font-black uppercase text-gray-400 tracking-widest">Assigned Markets</h4>
+                      {staffMarkets.length === 0 ? (
+                        <p className="text-sm font-bold text-gray-400">No markets assigned yet.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {staffMarkets.map(m => (
+                            <div key={m.id} className="bg-white p-4 rounded-2xl border flex justify-between items-center shadow-sm">
+                              <div>
+                                <p className="font-black text-gray-700">{m.name}</p>
+                                <p className="text-[10px] text-gray-400">{m.date}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className={`font-black ${m.given > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                                  {m.given} OUT / {m.returned} RET
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="text-[10px] text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full font-black uppercase border border-emerald-100">Staff</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

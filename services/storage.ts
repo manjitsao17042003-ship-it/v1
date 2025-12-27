@@ -1,7 +1,10 @@
 
+import { createClient } from '@supabase/supabase-js';
 import { AppState, User, UserRole, Customer, Battery, Market, Rental, RentalStatus, BatteryColor, MarketDefinition } from '../types';
 
-const STORAGE_KEY = 'market_charge_db_v4';
+const supabaseUrl = 'https://fdpcgtnlsuynekndmcpz.supabase.co';
+const supabaseKey = 'sb_publishable_4JqNL6kbS0tssUkmkGA-7w_Tv12wqxr';
+export const supabase = createClient(supabaseUrl, supabaseKey);
 
 export const naturalSort = (a: string | undefined, b: string | undefined) => {
   const s1 = a || '';
@@ -9,147 +12,195 @@ export const naturalSort = (a: string | undefined, b: string | undefined) => {
   return s1.localeCompare(s2, undefined, { numeric: true, sensitivity: 'base' });
 };
 
-const getInitialState = (): AppState => {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) return JSON.parse(saved);
-
-  return {
-    users: [
-      { id: 'admin', password: '123', role: UserRole.ADMIN, name: 'Main Admin' },
-      { id: 'staff', password: '123', role: UserRole.STAFF, name: 'Test Staff' }
-    ],
-    marketDefinitions: [
-      { id: 'm1', name: 'Main Bazar', day: 'Sunday' },
-      { id: 'm2', name: 'South Market', day: 'Sunday' }
-    ],
-    customers: [
-      { id: 'c1', name: 'Rahul Sharma', serialNumber: '1', marketName: 'Main Bazar', isDaily: false },
-      { id: 'c2', name: 'Amit Patel', serialNumber: '2', marketName: 'Main Bazar', isDaily: false }
-    ],
-    batteries: Array.from({ length: 100 }, (_, i) => ({ 
-      serial: `D${i + 1}`, 
-      color: 'default'
-    })),
-    markets: [],
-    rentals: []
-  };
-};
-
-let currentState = getInitialState();
-
-const save = () => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(currentState));
-};
-
 export const db = {
-  getUsers: () => currentState.users,
-  addUser: (user: User) => { currentState.users.push(user); save(); },
-  
-  // Market Definition Management
-  getMarketDefinitions: () => currentState.marketDefinitions,
-  addMarketDefinition: (name: string, day: string) => {
-    const id = Math.random().toString(36).substr(2, 9);
-    currentState.marketDefinitions.push({ id, name, day });
-    save();
+  getUsers: async (): Promise<User[]> => {
+    const { data, error } = await supabase.from('users').select('*');
+    if (error) throw error;
+    return data || [];
   },
-  deleteMarketDefinition: (id: string) => {
-    currentState.marketDefinitions = currentState.marketDefinitions.filter(m => m.id !== id);
-    save();
+  addUser: async (user: User) => {
+    const { error } = await supabase.from('users').insert([user]);
+    if (error) throw error;
+  },
+  
+  getMarketDefinitions: async (): Promise<MarketDefinition[]> => {
+    const { data, error } = await supabase.from('market_definitions').select('*');
+    if (error) throw error;
+    return data || [];
+  },
+  addMarketDefinition: async (name: string, day: string) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    const { error } = await supabase.from('market_definitions').insert([{ id, name, day }]);
+    if (error) throw error;
+  },
+  deleteMarketDefinition: async (id: string) => {
+    const { error } = await supabase.from('market_definitions').delete().eq('id', id);
+    if (error) throw error;
   },
 
-  getCustomers: () => currentState.customers,
-  addCustomer: (name: string, marketName: string, isDaily: boolean) => {
-    // Auto-calculate serial number for this specific market
-    const marketCustomers = currentState.customers.filter(c => c.marketName === marketName);
-    const maxSerial = marketCustomers.reduce((max, c) => {
-      const num = parseInt(c.serialNumber);
+  getCustomers: async (): Promise<Customer[]> => {
+    const { data, error } = await supabase.from('customers').select('*');
+    if (error) throw error;
+    return (data || []).map(c => ({
+      id: c.id,
+      name: c.name,
+      serialNumber: c.serial_number,
+      marketName: c.market_name,
+      isDaily: c.is_daily
+    }));
+  },
+  addCustomer: async (name: string, marketName: string, isDaily: boolean) => {
+    const { data: existing } = await supabase
+      .from('customers')
+      .select('serial_number')
+      .eq('market_name', marketName);
+    
+    const maxSerial = (existing || []).reduce((max, c) => {
+      const num = parseInt(c.serial_number);
       return !isNaN(num) && num > max ? num : max;
     }, 0);
     
-    const newCust: Customer = { 
+    const newCust = { 
       id: Math.random().toString(36).substr(2, 9), 
       name, 
-      serialNumber: (maxSerial + 1).toString(), 
-      marketName, 
-      isDaily 
+      serial_number: (maxSerial + 1).toString(), 
+      market_name: marketName, 
+      is_daily: isDaily 
     };
-    currentState.customers.push(newCust);
-    save();
+    
+    const { error } = await supabase.from('customers').insert([newCust]);
+    if (error) throw error;
     return newCust;
   },
-
-  deleteCustomer: (id: string) => {
-    currentState.customers = currentState.customers.filter(c => c.id !== id);
-    save();
+  deleteCustomer: async (id: string) => {
+    const { error } = await supabase.from('customers').delete().eq('id', id);
+    if (error) throw error;
   },
 
-  addCustomersBulk: (customerList: any[], marketName: string, isDaily: boolean) => {
-    let count = 0;
-    customerList.forEach(c => {
-      if (c.name) {
-        db.addCustomer(String(c.name).trim(), marketName, isDaily);
-        count++;
-      }
-    });
-    return count;
+  getBatteries: async (): Promise<Battery[]> => {
+    const { data, error } = await supabase.from('batteries').select('*');
+    if (error) throw error;
+    return data || [];
   },
-
-  getBatteries: () => currentState.batteries,
-  addBatteryRange: (prefix: string, start: number, end: number, color: BatteryColor = 'default') => {
+  addBatteryRange: async (prefix: string, start: number, end: number, color: BatteryColor = 'default') => {
+    const batteries = [];
     for (let i = start; i <= end; i++) {
-      const serial = `${prefix}${i}`;
-      if (!currentState.batteries.find(b => b.serial === serial)) {
-        currentState.batteries.push({ serial, color });
-      }
+      batteries.push({ serial: `${prefix}${i}`, color });
     }
-    save();
+    const { error } = await supabase.from('batteries').upsert(batteries);
+    if (error) throw error;
+  },
+  deleteBattery: async (serial: string) => {
+    const { error } = await supabase.from('batteries').delete().eq('serial', serial);
+    if (error) throw error;
   },
 
-  deleteBattery: (serial: string) => {
-    currentState.batteries = currentState.batteries.filter(b => b.serial !== serial);
-    save();
+  getMarkets: async (): Promise<Market[]> => {
+    const { data, error } = await supabase.from('markets').select('*');
+    if (error) throw error;
+    return (data || []).map(m => ({
+      id: m.id,
+      name: m.name,
+      date: m.date,
+      staffId: m.staff_id,
+      assignedCustomerIds: m.assigned_customer_ids || [],
+      batteryRangePrefix: m.battery_range_prefix,
+      batteryRangeStart: m.battery_range_start,
+      batteryRangeEnd: m.battery_range_end
+    }));
+  },
+  addMarket: async (market: Market) => {
+    const { error } = await supabase.from('markets').insert([{
+      id: market.id,
+      name: market.name,
+      date: market.date,
+      staff_id: market.staffId,
+      assigned_customer_ids: market.assignedCustomerIds,
+      battery_range_prefix: market.batteryRangePrefix,
+      battery_range_start: market.batteryRangeStart,
+      battery_range_end: market.batteryRangeEnd
+    }]);
+    if (error) throw error;
   },
 
-  getMarkets: () => currentState.markets,
-  addMarket: (market: Market) => {
-    currentState.markets.push(market);
-    save();
+  getRentals: async (): Promise<Rental[]> => {
+    const { data, error } = await supabase.from('rentals').select('*');
+    if (error) throw error;
+    return (data || []).map(r => ({
+      id: r.id,
+      marketId: r.market_id,
+      customerId: r.customer_id,
+      batterySerial: r.battery_serial,
+      batteryColor: r.battery_color,
+      status: r.status,
+      date: r.date,
+      staffId: r.staff_id,
+      timestamp: r.timestamp
+    }));
+  },
+  addRental: async (rental: Rental) => {
+    const { error } = await supabase.from('rentals').insert([{
+      id: rental.id,
+      market_id: rental.marketId,
+      customer_id: rental.customerId,
+      battery_serial: rental.batterySerial,
+      battery_color: rental.batteryColor,
+      status: rental.status,
+      date: rental.date,
+      staff_id: rental.staffId,
+      timestamp: rental.timestamp
+    }]);
+    if (error) throw error;
+  },
+  updateRentalStatus: async (rentalId: string, status: RentalStatus) => {
+    const { error } = await supabase.from('rentals').update({ status }).eq('id', rentalId);
+    if (error) throw error;
   },
 
-  getRentals: () => currentState.rentals,
-  addRental: (rental: Rental) => {
-    currentState.rentals.push(rental);
-    save();
-  },
-
-  updateRentalStatus: (rentalId: string, status: RentalStatus) => {
-    const rental = currentState.rentals.find(r => r.id === rentalId);
-    if (rental) {
-      rental.status = status;
-      save();
-    }
-  },
-
-  findAvailableBatteriesForMarket: (market: Market): Battery[] => {
+  findAvailableBatteriesForMarket: async (market: Market): Promise<Battery[]> => {
     const allMarketSerials: string[] = [];
     for (let i = market.batteryRangeStart; i <= market.batteryRangeEnd; i++) {
       allMarketSerials.push(`${market.batteryRangePrefix}${i}`);
     }
 
-    const assignedSerials = currentState.rentals
-      .filter(r => r.marketId === market.id && (r.status === RentalStatus.GIVEN || r.status === RentalStatus.LOST))
-      .map(r => r.batterySerial);
+    const { data: rentals } = await supabase
+      .from('rentals')
+      .select('battery_serial')
+      .eq('market_id', market.id)
+      .in('status', [RentalStatus.GIVEN, RentalStatus.LOST]);
 
+    const assignedSerials = (rentals || []).map(r => r.battery_serial);
     const availableSerials = allMarketSerials.filter(s => !assignedSerials.includes(s));
     
+    const { data: batteries } = await supabase.from('batteries').select('*').in('serial', availableSerials);
+    
     return availableSerials.map(s => {
-      const found = currentState.batteries.find(b => b.serial === s);
+      const found = (batteries || []).find(b => b.serial === s);
       return found || { serial: s, color: 'default' as BatteryColor };
     });
   },
 
-  getTodayMarketForStaff: (staffId: string) => {
+  getTodayMarketForStaff: async (staffId: string): Promise<Market | undefined> => {
     const today = new Date().toISOString().split('T')[0];
-    return currentState.markets.find(m => m.date === today && m.staffId === staffId);
+    const { data, error } = await supabase
+      .from('markets')
+      .select('*')
+      .eq('date', today)
+      .eq('staff_id', staffId)
+      .maybeSingle();
+    
+    if (error) throw error;
+    if (!data) return undefined;
+
+    return {
+      id: data.id,
+      name: data.name,
+      date: data.date,
+      staffId: data.staff_id,
+      assignedCustomerIds: data.assigned_customer_ids || [],
+      batteryRangePrefix: data.battery_range_prefix,
+      batteryRangeStart: data.battery_range_start,
+      batteryRangeEnd: data.battery_range_end
+    };
   }
 };
