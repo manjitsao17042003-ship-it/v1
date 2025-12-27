@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { db, naturalSort } from '../services/storage';
-// Fix: Added Battery to the import list from '../types'
 import { UserRole, RentalStatus, BatteryColor, User, Market, Rental, Customer, MarketDefinition, Battery } from '../types';
 
 const AdminDashboard: React.FC = () => {
@@ -9,6 +9,7 @@ const AdminDashboard: React.FC = () => {
   const [refresh, setRefresh] = useState(0);
   const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Global State for Dash
   const [markets, setMarkets] = useState<Market[]>([]);
@@ -123,6 +124,62 @@ const AdminDashboard: React.FC = () => {
     });
     setRefresh(r => r + 1);
     alert('Market scheduled successfully.');
+  };
+
+  const handleExportCustomers = () => {
+    if (!selectedTargetMarket) return;
+    const marketCusts = customers
+      .filter(c => c.marketName === selectedTargetMarket)
+      .sort((a, b) => naturalSort(a.serialNumber, b.serialNumber))
+      .map(c => ({
+        "Serial Number": c.serialNumber,
+        "Customer Name": c.name,
+        "Market": c.marketName
+      }));
+
+    const ws = XLSX.utils.json_to_sheet(marketCusts);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Customers");
+    XLSX.writeFile(wb, `Customers_${selectedTargetMarket}_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedTargetMarket) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        if (typeof bstr !== 'string') return;
+        
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        setIsLoading(true);
+        for (const row of (data as any[])) {
+          const name = row["Customer Name"] || row["Name"] || row["name"];
+          if (name) {
+            await db.addCustomer(name.toString().trim(), selectedTargetMarket, selectedTargetMarket === 'Daily');
+          }
+        }
+        alert("Import completed successfully!");
+        setRefresh(r => r + 1);
+      } catch (err) {
+        console.error(err);
+        alert("Error importing file. Please ensure column header is 'Customer Name'.");
+      } finally {
+        setIsLoading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsBinaryString(file);
   };
 
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -305,7 +362,32 @@ const AdminDashboard: React.FC = () => {
           </div>
           {selectedTargetMarket && (
             <div className="bg-white p-8 rounded-3xl border space-y-6">
-               <h3 className="font-black text-xl text-emerald-700">Add to {selectedTargetMarket}</h3>
+               <div className="flex justify-between items-center border-b pb-4">
+                 <h3 className="font-black text-xl text-emerald-700">Add to {selectedTargetMarket}</h3>
+                 <div className="flex gap-3">
+                    <input 
+                      type="file" 
+                      ref={fileInputRef} 
+                      onChange={handleFileImport} 
+                      accept=".xlsx, .xls, .csv" 
+                      className="hidden" 
+                    />
+                    <button 
+                      onClick={handleImportClick}
+                      className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-4 py-2 rounded-xl font-bold text-xs hover:bg-emerald-100 transition-all flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                      Bulk Import
+                    </button>
+                    <button 
+                      onClick={handleExportCustomers}
+                      className="bg-gray-50 text-gray-600 border border-gray-200 px-4 py-2 rounded-xl font-bold text-xs hover:bg-gray-100 transition-all flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                      Export List
+                    </button>
+                 </div>
+               </div>
                <form onSubmit={handleAddCustomer} className="flex gap-4">
                  <input value={custName} onChange={e => setCustName(e.target.value)} placeholder="Full Name" className="flex-1 border p-4 rounded-2xl bg-gray-50 font-bold" required />
                  <button className="bg-emerald-600 text-white px-8 rounded-2xl font-black">Save</button>
