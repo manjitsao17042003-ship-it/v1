@@ -230,7 +230,7 @@ const StaffDashboard: React.FC<StaffDashboardProps> = ({ staff }) => {
           </div>
         </div>
         <div className="space-y-3">
-          <p className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Tap Name -> Tap Battery to Return</p>
+          <p className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Tap Name &rarr; Tap Battery to Return</p>
           {filteredCustomers.length === 0 ? (
             <div className="bg-white p-12 rounded-3xl text-center border-2 border-dashed text-gray-400 font-black uppercase">
               {returnSearch ? 'No matches' : 'All batteries are returned'}
